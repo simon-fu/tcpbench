@@ -87,7 +87,8 @@ async fn make_connections(args: Arc<ClientArgs>) -> Result<Vec<TcpStream>> {
     while n < args.conns {
         if let Some(d) = pacer.get_sleep_duration(n as u64) {
             if let Some(h) = tasks.pop_front() {
-                let socket = h.await??;
+                let socket: TcpStream = h.await??;
+                socket.set_nodelay(true)?;
                 sockets.push(socket);
                 continue;
             } else {
