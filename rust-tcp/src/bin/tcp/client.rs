@@ -87,13 +87,11 @@ async fn recv_packest(socket: &mut TcpStream) -> Result<Vec<i64>> {
 
             let ts = buf.get_i64();
             let _no = buf.get_u64();
-            // println!("aaa: recv No.{} packets, ts {}, payload_len {}", no, ts, payload_len);
 
             let diff = now_millis() - ts;
             latency.push(diff);
             buf.advance((payload_len-(8+8)) as usize);
         } else {
-            // println!("aaa: recv {} packets, payload_len {}", latency.len(), payload_len);
             return Ok(latency)
         }
     }

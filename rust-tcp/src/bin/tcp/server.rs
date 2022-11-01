@@ -63,15 +63,12 @@ async fn send_packets(socket: &mut TcpStream, args: Arc<ServerArgs>) -> Result<(
             cursor.put_u32((args.packet_len - 4) as u32);
             cursor.put_i64(ts);
             cursor.put_u64(n);
-            // println!("aaa: sent No.{} packets, ts {}", n, ts);
         }
 
         // socket.write_all(&buf[..]).await?;
         socket.write_all_buf(&mut &buf[..]).await?;
         
     }
-
-    println!("aaa: sent {} packets", packets);
 
     // write last packet
     {
