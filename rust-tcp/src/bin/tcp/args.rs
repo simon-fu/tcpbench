@@ -30,6 +30,9 @@ pub struct ClientArgs {
     #[clap(long = "cps", long_help = "setup connections rate, connections/second", default_value = "3000")]
     pub cps: u32,
 
+    #[clap(long = "print-latency", long_help = "print every latency")]
+    pub print_latency: bool,
+
 }
 
 #[derive(Parser, Debug, Clone)]

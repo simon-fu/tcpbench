@@ -21,8 +21,9 @@ pub async fn run(mut args: ClientArgs) -> Result<()> {
 
     for (n, mut socket) in sockets.into_iter().enumerate() {
         let tx = tx.clone();
+        let args = args.clone();
         tokio::spawn(async move {
-            let r = recv_packest(&mut socket).await;
+            let r = recv_packest(&mut socket, n, args.print_latency).await;
             let _r = tx.send((n, r));
             Result::<_>::Ok(())
         });
@@ -45,7 +46,7 @@ pub async fn run(mut args: ClientArgs) -> Result<()> {
     Ok(())
 }
 
-async fn recv_packest(socket: &mut TcpStream) -> Result<Latency> {
+async fn recv_packest(socket: &mut TcpStream, no: usize, print_latency: bool) -> Result<Latency> {
     let mut latency = Latency::new();
     let mut buf = BytesMut::new(); 
     loop {
@@ -66,6 +67,10 @@ async fn recv_packest(socket: &mut TcpStream) -> Result<Latency> {
             let diff = now_millis() - ts;
             latency.observe(diff);
             buf.advance((payload_len-(8+8)) as usize);
+
+            if print_latency {
+                println!("conn {}: {} ms", no, diff);
+            }
         } else {
             return Ok(latency)
         }
