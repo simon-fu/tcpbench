@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Instant, collections::VecDeque};
 
 use anyhow::{Result, Context};
 use bytes::{BytesMut, Buf};
-use rust_tcp::{now_millis, Pacer, normalize_addr};
+use rust_tcp::{now_millis, Pacer, normalize_addr, Latency};
 use tokio::{io::AsyncReadExt, net::TcpStream};
 
 use crate::args::ClientArgs;
@@ -28,7 +28,7 @@ pub async fn run(mut args: ClientArgs) -> Result<()> {
         });
     }
 
-    let mut all_latency = Vec::new();
+    let mut all_latency = Vec::with_capacity(args.conns as usize);
     for _ in 0..args.conns {
         let (n, r)  = rx.recv().await.with_context(||"fail to waiting for done")?;
         let latency = r.with_context(||format!("No.{} connection error", n))?;
@@ -36,33 +36,8 @@ pub async fn run(mut args: ClientArgs) -> Result<()> {
     }
 
     {
-        let mut min = i64::MAX;
-        let mut max = i64::MIN;
-        let mut sum = 0;
-        let mut num = 0;
-
-        for list in &all_latency {
-            for l in list {
-                let latency = *l;
-                sum += latency;
-                if latency < min {
-                    min = latency;
-                }
-                if latency > max {
-                    max = latency;
-                }
-
-                num += 1;
-            }
-        }
-
-        let average = if num > 0 {
-            (sum + sum-1) / num
-        } else {
-            0
-        };
-
-        println!("latency: num/min/max/average {:?}", (num, min, max, average))
+        let latency = Latency::from_iter(all_latency.iter());
+        println!("latency: num/min/max/average {:?}", (latency.num(), latency.min(), latency.max(), latency.average()))
     }
 
     println!("done.");
@@ -70,8 +45,8 @@ pub async fn run(mut args: ClientArgs) -> Result<()> {
     Ok(())
 }
 
-async fn recv_packest(socket: &mut TcpStream) -> Result<Vec<i64>> {
-    let mut latency = Vec::with_capacity(1_000_000);
+async fn recv_packest(socket: &mut TcpStream) -> Result<Latency> {
+    let mut latency = Latency::new();
     let mut buf = BytesMut::new(); 
     loop {
         while buf.len() < 4 {
@@ -89,7 +64,7 @@ async fn recv_packest(socket: &mut TcpStream) -> Result<Vec<i64>> {
             let _no = buf.get_u64();
 
             let diff = now_millis() - ts;
-            latency.push(diff);
+            latency.observe(diff);
             buf.advance((payload_len-(8+8)) as usize);
         } else {
             return Ok(latency)
@@ -132,3 +107,4 @@ async fn make_connections(args: Arc<ClientArgs>) -> Result<Vec<TcpStream>> {
 
     Ok(sockets)
 }
+
