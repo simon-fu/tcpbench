@@ -57,15 +57,30 @@ async fn send_packets(socket: &mut TcpStream, args: Arc<ServerArgs>) -> Result<(
             tokio::time::sleep(d).await;
         }
 
-        let cursor = &mut &mut buf[..];
-        cursor.put_u32((args.packet_len - 4) as u32);
-        cursor.put_i64(now_millis());
-        socket.write_all(&buf[..]).await?;
+        {
+            let cursor = &mut &mut buf[..];
+            let ts = now_millis();
+            cursor.put_u32((args.packet_len - 4) as u32);
+            cursor.put_i64(ts);
+            cursor.put_u64(n);
+            // println!("aaa: sent No.{} packets, ts {}", n, ts);
+        }
+
+        // socket.write_all(&buf[..]).await?;
+        socket.write_all_buf(&mut &buf[..]).await?;
+        
     }
 
+    println!("aaa: sent {} packets", packets);
+
     // write last packet
-    buf.put_u32(0);
-    socket.write_all(&buf).await?;
+    {
+        let cursor = &mut &mut buf[..];
+        cursor.put_u32(0);
+    }
+
+    // socket.write_all(&buf).await?;
+    socket.write_all_buf(&mut &buf[..]).await?;
 
     socket.flush().await?;
 
@@ -78,6 +93,7 @@ async fn accept_sockets(listener: TcpListener) -> Result<Vec<TcpStream>> {
     let task = tokio::spawn(async move {
         let mut sockets = Vec::new();
         let mut print_n = 0;
+        let mut print_time = Instant::now() + Duration::from_millis(1000);
         loop {
             tokio::select! {
                 r = listener.accept() => {
@@ -89,7 +105,8 @@ async fn accept_sockets(listener: TcpListener) -> Result<Vec<TcpStream>> {
                     break;
                 }
 
-                _r = tokio::time::sleep(Duration::from_millis(1000)) => {
+                _r = tokio::time::sleep_until(print_time.into()) => {
+                    print_time = Instant::now() + Duration::from_millis(1000);
                     if print_n < sockets.len() {
                         print_n = sockets.len();
                         println!("accept connections [{}]", print_n);

@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant, collections::VecDeque};
 
 use anyhow::{Result, Context};
 use bytes::{BytesMut, Buf};
@@ -13,25 +13,20 @@ pub async fn run(mut args: ClientArgs) -> Result<()> {
     normalize_addr(&mut args.target, "11111")?;
     let args = Arc::new(args);
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let pacer = Pacer::new(args.cps as u64);
     let start_time = Instant::now();
-    for n in 0..args.conns {
-        if let Some(d) = pacer.get_sleep_duration(n as u64) {
-            tokio::time::sleep(d).await;
-        }
+    let sockets = make_connections(args.clone()).await?; 
+    println!("make connections [{}] in [{:?}]", args.conns, start_time.elapsed());
 
-        let mut socket = TcpStream::connect(&args.target).await
-        .with_context(||format!("fail to connect to [{}]", args.target))?;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
+    for (n, mut socket) in sockets.into_iter().enumerate() {
         let tx = tx.clone();
         tokio::spawn(async move {
             let r = recv_packest(&mut socket).await;
             let _r = tx.send((n, r));
+            Result::<_>::Ok(())
         });
     }
-
-    println!("make connections [{}] in [{:?}]", args.conns, start_time.elapsed());
 
     let mut all_latency = Vec::new();
     for _ in 0..args.conns {
@@ -85,18 +80,57 @@ async fn recv_packest(socket: &mut TcpStream) -> Result<Vec<i64>> {
 
         let payload_len = buf.get_u32() as usize;
         
-        if payload_len >= 8 { 
+        if payload_len >= (8+8) { 
             while buf.len() < payload_len {
                 socket.read_buf(&mut buf).await?;
             }
 
             let ts = buf.get_i64();
+            let _no = buf.get_u64();
+            // println!("aaa: recv No.{} packets, ts {}, payload_len {}", no, ts, payload_len);
+
             let diff = now_millis() - ts;
             latency.push(diff);
-            buf.advance((payload_len-8) as usize);
+            buf.advance((payload_len-(8+8)) as usize);
         } else {
+            // println!("aaa: recv {} packets, payload_len {}", latency.len(), payload_len);
             return Ok(latency)
         }
     }
 }
 
+async fn make_connections(args: Arc<ClientArgs>) -> Result<Vec<TcpStream>> {
+    let mut sockets = Vec::with_capacity(args.conns as usize);
+    let mut tasks = VecDeque::with_capacity(args.conns as usize);
+
+    let pacer = Pacer::new(args.cps as u64);
+
+    let mut n = 0;
+    while n < args.conns {
+        if let Some(d) = pacer.get_sleep_duration(n as u64) {
+            if let Some(h) = tasks.pop_front() {
+                let socket = h.await??;
+                sockets.push(socket);
+                continue;
+            } else {
+                tokio::time::sleep(d).await;
+            }
+        }
+
+        let args = args.clone();
+
+        let h = tokio::spawn(async move {
+            TcpStream::connect(&args.target).await
+            .with_context(||format!("fail to connect to [{}]", args.target))
+        });
+        tasks.push_back(h);
+        n += 1;
+    }
+
+    while let Some(h) = tasks.pop_front() {
+        let socket = h.await??;
+        sockets.push(socket);
+    }
+
+    Ok(sockets)
+}
